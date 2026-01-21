@@ -1,43 +1,40 @@
 #!/usr/bin/env python3
-# Make sure you have iperf3 executable downloaded and make sure it's running before you run this code
-# Below is the command to run this code
-# TCP: python iperf_automation.py <ip address> -p <port> -t <test length> -i <test interval> -o <saved folder>
-# Example: python iperf_automation.py 127.0.0.1 -p 5201 -t 8 -i 20 -o highway_test_Linux
-# UDP: python iperf_automation.py <ip address> -p <port> -t <test length> -i <test interval> -o <saved folder> -u -b <bandwidth>
-# Example: python iperf_automation.py 127.0.0.1 -p 5201 -t 8 -i 20 -o highway_test_Linux_udp -u -b 100M
-# -b 100M = 100 Mbps
-# -b 1G = 1 Gbps
-# -b 500M = 500 Mbps
-# -b 10M = 10 Mbps
+"""
+Iperf3 automation for network performance testing.
+Configured via environment variables for containerized deployment.
+
+Required environment variables:
+  SERVER_IP    - iperf3 server IP address
+  
+Optional environment variables (with defaults):
+  PORT         - Server port (default: 5201)
+  DURATION     - Test duration in seconds (default: 5)
+  INTERVAL     - Interval between tests in seconds (default: 10)
+  OUTPUT_DIR   - Output directory (default: /data)
+  PROTOCOL     - 'tcp' or 'udp' (default: tcp)
+  BANDWIDTH    - UDP bandwidth limit (default: 100M)
+
+Usage:
+  podman run --env-file options.env -v ./results:/data:z image_name
+"""
 import json
 import csv
 import time
 import datetime
 import subprocess
-import argparse
 import os
 from pathlib import Path
 
 
-server_ip = os.environ["SERVER_IP"]
-port = os.environ["PORT"]
-duration = os.environ["DURATION"]
-output_dir = os.environ["OUTPUT_DIR"]
-test_count = os.environ["TEST_COUNT"]
-protocol = os.environ["PROTOCOL"]
-bandwidth = os.environ["BANDWIDTH"]
-
-## Runs both Download and Upload tests
-def run_tests(server_ip, port, duration, iperf3_path, output_dir, test_count, protocol, bandwidth):
+def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth):
+    """Run download and upload iperf3 tests."""
     results = {}
     
     # Download test
     print("Running download test...")
-    cmd = [iperf3_path, '-c', server_ip, '-p', str(port), '-t', str(duration), '-R', '-J']
+    cmd = ['iperf3', '-c', server_ip, '-p', str(port), '-t', str(duration), '-R', '-J']
     if protocol == 'udp':
-        cmd.insert(-2, '-u')
-        cmd.insert(-2, '-b')
-        cmd.insert(-2, bandwidth)
+        cmd.extend(['-u', '-b', bandwidth])
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
@@ -56,13 +53,11 @@ def run_tests(server_ip, port, duration, iperf3_path, output_dir, test_count, pr
     
     time.sleep(1)
     
-    # Upload test  
+    # Upload test
     print("Running upload test...")
-    cmd = [iperf3_path, '-c', server_ip, '-p', str(port), '-t', str(duration), '-J']
+    cmd = ['iperf3', '-c', server_ip, '-p', str(port), '-t', str(duration), '-J']
     if protocol == 'udp':
-        cmd.insert(-1, '-u')
-        cmd.insert(-1, '-b')
-        cmd.insert(-1, bandwidth)
+        cmd.extend(['-u', '-b', bandwidth])
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
@@ -81,10 +76,12 @@ def run_tests(server_ip, port, duration, iperf3_path, output_dir, test_count, pr
     
     return results
 
+
 def save_to_csv(results, csv_file, test_number, protocol):
+    """Save test results to CSV file."""
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
     
-    # If file csv file does not exist, create a new one
+    # Create CSV with headers if it doesn't exist
     if not csv_file.exists():
         with open(csv_file, 'w', newline='') as f:
             if protocol == 'tcp':
@@ -108,47 +105,52 @@ def save_to_csv(results, csv_file, test_number, protocol):
             results['upload_lost_packets'], results['upload_lost_percent']
         ]
     
-    # New Row
+    # Append row to CSV
     with open(csv_file, 'a', newline='') as f:
         csv.writer(f).writerow(row)
     
+    # Print summary
     if protocol == 'tcp':
         print(f"Test #{test_number}: Down={results['download_mbps']:.2f} Mbps, Up={results['upload_mbps']:.2f} Mbps")
     else:
         print(f"Test #{test_number}: Down={results['download_mbps']:.2f} Mbps, Up={results['upload_mbps']:.2f} Mbps | DL Loss: {results['download_lost_percent']:.2f}%, UL Loss: {results['upload_lost_percent']:.2f}%")
 
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('server_ip')
-    parser.add_argument('-p', '--port', type=int, default=5201)
-    parser.add_argument('-t', '--duration', type=int, default=5)
-    parser.add_argument('-i', '--interval', type=int, default=10)
-    parser.add_argument('-o', '--output-dir', default='test_results')
-    parser.add_argument('-u', '--udp', action='store_true', help='Use UDP instead of TCP')
-    parser.add_argument('-b', '--bandwidth', default='100M')
+    # Read configuration from environment variables
+    server_ip = os.environ.get('SERVER_IP')
+    port = int(os.environ.get('PORT', 5201))
+    duration = int(os.environ.get('DURATION', 5))
+    interval = int(os.environ.get('INTERVAL', 10))
+    output_dir = Path(os.environ.get('OUTPUT_DIR', '/data'))
+    protocol = os.environ.get('PROTOCOL', 'tcp').lower()
+    bandwidth = os.environ.get('BANDWIDTH', '100M')
     
-    args = parser.parse_args()
+    # Validate required parameters
+    if not server_ip:
+        raise ValueError("SERVER_IP environment variable is required")
     
-    protocol = 'udp' if args.udp else 'tcp'
+    if protocol not in ['tcp', 'udp']:
+        raise ValueError(f"PROTOCOL must be 'tcp' or 'udp', got: {protocol}")
     
-    iperf3_path = 'iperf3'
-    
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True)
+    # Setup output
+    output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     csv_file = output_dir / f"results_{protocol}_{timestamp}.csv"
     
-    print(f"Testing {args.server_ip}:{args.port} using {protocol.upper()}")
+    print(f"Testing {server_ip}:{port} using {protocol.upper()}")
     if protocol == 'udp':
-        print(f"UDP bandwidth: {args.bandwidth}")
-    print(f"Results: {csv_file}")
+        print(f"UDP bandwidth: {bandwidth}")
+    print(f"Results: {csv_file}\n")
     
+    # Run continuous tests
     test_count = 0
     while True:
         test_count += 1
-        results = run_tests(args.server_ip, args.port, args.duration, iperf3_path, output_dir, test_count, protocol, args.bandwidth)
+        results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth)
         save_to_csv(results, csv_file, test_count, protocol)
-        time.sleep(args.interval)
+        time.sleep(interval)
+
 
 if __name__ == "__main__":
     main()
