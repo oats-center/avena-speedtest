@@ -21,8 +21,11 @@ RUN pip install -r requirements.txt
 
 # RUNTIME
 FROM python:3.14.0-slim-bookworm as runtime
-
 WORKDIR /usr/src/app
+
+# Install Iperf3
+RUN apt-get -y update
+RUN apt-get -y install iperf3 
 
 # Copy compiled venv from builder
 COPY --from=builder /opt/venv /opt/venv
