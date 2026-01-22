@@ -4,7 +4,8 @@ Iperf3 automation for network performance testing.
 Configured via environment variables for containerized deployment.
 
 Required environment variables:
-  SERVER_IP    - iperf3 server IP address
+  MODE         - 'client' or 'server'
+  SERVER_IP    - iperf3 server IP address (only required in client mode)
   
 Optional environment variables (with defaults):
   PORT         - Server port (default: 5201)
@@ -13,6 +14,7 @@ Optional environment variables (with defaults):
   OUTPUT_DIR   - Output directory (default: /data)
   PROTOCOL     - 'tcp' or 'udp' (default: tcp)
   BANDWIDTH    - UDP bandwidth limit (default: 100M)
+  BIND_INTERFACE - Network interface to bind to (e.g., eth0, wlan0)
 
 Usage:
   podman run --env-file options.env -v ./results:/data:z image_name
@@ -26,7 +28,21 @@ import os
 from pathlib import Path
 
 
-def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth):
+def run_server(port, bind_interface=None):
+    """Run iperf3 in server mode."""
+    print(f"Starting iperf3 server on port {port}")
+    if bind_interface:
+        print(f"Bound to interface: {bind_interface}")
+    print("Waiting for connections...\n")
+    
+    cmd = ['iperf3', '-s', '-p', str(port)]
+    if bind_interface:
+        cmd.extend(['-B', bind_interface])
+    
+    subprocess.run(cmd)
+
+
+def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface=None):
     """Run download and upload iperf3 tests."""
     results = {}
     
@@ -35,6 +51,8 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     cmd = ['iperf3', '-c', server_ip, '-p', str(port), '-t', str(duration), '-R', '-J']
     if protocol == 'udp':
         cmd.extend(['-u', '-b', bandwidth])
+    if bind_interface:
+        cmd.extend(['-B', bind_interface])
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
@@ -58,6 +76,8 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     cmd = ['iperf3', '-c', server_ip, '-p', str(port), '-t', str(duration), '-J']
     if protocol == 'udp':
         cmd.extend(['-u', '-b', bandwidth])
+    if bind_interface:
+        cmd.extend(['-B', bind_interface])
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
@@ -118,6 +138,7 @@ def save_to_csv(results, csv_file, test_number, protocol):
 
 def main():
     # Read configuration from environment variables
+    mode = os.environ.get('MODE', 'client').lower()
     server_ip = os.environ.get('SERVER_IP')
     port = int(os.environ.get('PORT', 5201))
     duration = int(os.environ.get('DURATION', 5))
@@ -125,10 +146,20 @@ def main():
     output_dir = Path(os.environ.get('OUTPUT_DIR', '/data'))
     protocol = os.environ.get('PROTOCOL', 'tcp').lower()
     bandwidth = os.environ.get('BANDWIDTH', '100M')
+    bind_interface = os.environ.get('BIND_INTERFACE')
     
-    # Validate required parameters
+    # Validate mode
+    if mode not in ['client', 'server']:
+        raise ValueError(f"MODE must be 'client' or 'server', got: {mode}")
+    
+    # Server mode
+    if mode == 'server':
+        run_server(port, bind_interface)
+        return
+    
+    # Client mode - validate required parameters
     if not server_ip:
-        raise ValueError("SERVER_IP environment variable is required")
+        raise ValueError("SERVER_IP environment variable is required in client mode")
     
     if protocol not in ['tcp', 'udp']:
         raise ValueError(f"PROTOCOL must be 'tcp' or 'udp', got: {protocol}")
@@ -141,13 +172,15 @@ def main():
     print(f"Testing {server_ip}:{port} using {protocol.upper()}")
     if protocol == 'udp':
         print(f"UDP bandwidth: {bandwidth}")
+    if bind_interface:
+        print(f"Bound to interface: {bind_interface}")
     print(f"Results: {csv_file}\n")
     
     # Run continuous tests
     test_count = 0
     while True:
         test_count += 1
-        results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth)
+        results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface)
         save_to_csv(results, csv_file, test_count, protocol)
         time.sleep(interval)
 
