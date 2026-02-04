@@ -15,6 +15,8 @@ Optional environment variables (with defaults):
   PROTOCOL     - 'tcp' or 'udp' (default: tcp)
   BANDWIDTH    - UDP bandwidth limit (default: 100M)
   BIND_INTERFACE - Network interface to bind to (e.g., eth0, wlan0)
+  NATS_URL     - NATS server URL (default: nats://deltax.speedtest:4222)
+  NATS_TOPIC   - NATS topic to publish to (default: speedtest)
 
 Usage:
   podman run --env-file options.env -v ./results:/data:z image_name
@@ -26,6 +28,38 @@ import datetime
 import subprocess
 import os
 from pathlib import Path
+import asyncio
+from nats.aio.client import Client as NATS
+
+
+async def publish_to_nats(nats_url, topic, data):
+    """Publish JSON data to NATS topic."""
+    nc = NATS()
+    
+    try:
+        await nc.connect(nats_url)
+        
+        # Convert data to JSON bytes
+        message = json.dumps(data).encode()
+        
+        # Publish to topic
+        await nc.publish(topic, message)
+        await nc.flush()
+        
+        print(f"Published to NATS topic '{topic}'")
+        
+    except Exception as e:
+        print(f"Error publishing to NATS: {e}")
+    finally:
+        await nc.close()
+
+
+def send_to_nats(nats_url, topic, data):
+    """Synchronous wrapper for NATS publishing."""
+    try:
+        asyncio.run(publish_to_nats(nats_url, topic, data))
+    except Exception as e:
+        print(f"Failed to send to NATS: {e}")
 
 
 def run_server(port, bind_interface=None):
@@ -45,6 +79,7 @@ def run_server(port, bind_interface=None):
 def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface=None):
     """Run download and upload iperf3 tests."""
     results = {}
+    raw_results = {'download': None, 'upload': None}
     
     # Download test
     print("Running download test...")
@@ -56,6 +91,7 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
+    raw_results['download'] = data
     
     if protocol == 'udp':
         results['download_mbps'] = data['end']['sum']['bits_per_second'] / 1_000_000
@@ -81,6 +117,7 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     data = json.loads(result.stdout)
+    raw_results['upload'] = data
     
     if protocol == 'udp':
         results['upload_mbps'] = data['end']['sum']['bits_per_second'] / 1_000_000
@@ -94,7 +131,7 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     with open(output_dir / f"raw_upload_{test_count:03d}.json", 'w') as f:
         f.write(result.stdout)
     
-    return results
+    return results, raw_results
 
 
 def save_to_csv(results, csv_file, test_number, protocol):
@@ -147,6 +184,8 @@ def main():
     protocol = os.environ.get('PROTOCOL', 'tcp').lower()
     bandwidth = os.environ.get('BANDWIDTH', '100M')
     bind_interface = os.environ.get('BIND_INTERFACE')
+    nats_url = os.environ.get('NATS_URL', 'nats://deltax.speedtest:4222')
+    nats_topic = os.environ.get('NATS_TOPIC', 'speedtest')
     
     # Validate mode
     if mode not in ['client', 'server']:
@@ -174,14 +213,27 @@ def main():
         print(f"UDP bandwidth: {bandwidth}")
     if bind_interface:
         print(f"Bound to interface: {bind_interface}")
+    print(f"NATS publishing to: {nats_url} on topic '{nats_topic}'")
     print(f"Results: {csv_file}\n")
     
     # Run continuous tests
     test_count = 0
     while True:
         test_count += 1
-        results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface)
+        results, raw_results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface)
         save_to_csv(results, csv_file, test_count, protocol)
+        
+        # Publish to NATS
+        nats_payload = {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'test_number': test_count,
+            'protocol': protocol,
+            'results': results,
+            'raw_download': raw_results['download'],
+            'raw_upload': raw_results['upload']
+        }
+        send_to_nats(nats_url, nats_topic, nats_payload)
+        
         time.sleep(interval)
 
 
