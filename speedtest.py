@@ -216,25 +216,21 @@ def main():
     print(f"NATS publishing to: {nats_url} on topic '{nats_topic}'")
     print(f"Results: {csv_file}\n")
     
-    # Run continuous tests
-    test_count = 0
-    while True:
-        test_count += 1
-        results, raw_results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface)
-        save_to_csv(results, csv_file, test_count, protocol)
-        
-        # Publish to NATS
-        nats_payload = {
-            'timestamp': datetime.datetime.now().isoformat(),
-            'test_number': test_count,
-            'protocol': protocol,
-            'results': results,
-            'raw_download': raw_results['download'],
-            'raw_upload': raw_results['upload']
-        }
-        send_to_nats(nats_url, nats_topic, nats_payload)
-        
-        time.sleep(interval)
+    # Run a single test
+    test_count = 1
+    results, raw_results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface)
+    save_to_csv(results, csv_file, test_count, protocol)
+    
+    # Publish to NATS
+    nats_payload = {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'test_number': test_count,
+        'protocol': protocol,
+        'results': results,
+        'raw_download': raw_results['download'],
+        'raw_upload': raw_results['upload']
+    }
+    send_to_nats(nats_url, nats_topic, nats_payload)
 
 
 if __name__ == "__main__":
