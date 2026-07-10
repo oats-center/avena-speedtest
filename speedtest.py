@@ -187,6 +187,11 @@ def main():
     nats_url = os.environ.get('NATS_URL', 'nats://deltax.speedtest:4222')
     nats_topic = os.environ.get('NATS_TOPIC', 'speedtest')
     
+    # Grab the manual tracking variables passed from the Bash script
+    test_number = int(os.environ.get('TEST_NUMBER', 1))
+    client_loc = os.environ.get('CLIENT_LOC', 'unknown')
+    server_loc = os.environ.get('SERVER_LOC', 'unknown')
+    
     # Validate mode
     if mode not in ['client', 'server']:
         raise ValueError(f"MODE must be 'client' or 'server', got: {mode}")
@@ -216,15 +221,16 @@ def main():
     print(f"NATS publishing to: {nats_url} on topic '{nats_topic}'")
     print(f"Results: {csv_file}\n")
     
-    # Run a single test
-    test_count = 1
-    results, raw_results = run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandwidth, bind_interface)
-    save_to_csv(results, csv_file, test_count, protocol)
+    # Run a single test using the test_number from Bash
+    results, raw_results = run_tests(server_ip, port, duration, output_dir, test_number, protocol, bandwidth, bind_interface)
+    save_to_csv(results, csv_file, test_number, protocol)
     
     # Publish to NATS
     nats_payload = {
         'timestamp': datetime.datetime.now().isoformat(),
-        'test_number': test_count,
+        'test_number': test_number,
+        'client_location': client_loc,
+        'server_location': server_loc,
         'protocol': protocol,
         'results': results,
         'raw_download': raw_results['download'],
