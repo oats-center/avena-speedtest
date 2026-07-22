@@ -101,7 +101,9 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
         results['download_lost_packets'] = dl_stats.get('lost_packets', 0)
         results['download_lost_percent'] = dl_stats.get('lost_percent', 0)
     else:
-        results['download_mbps'] = data['end']['sum_received']['bits_per_second'] / 1_000_000
+        # Safe parsing for TCP to prevent crashes on dropped connections
+        dl_stats = data.get('end', {}).get('sum_received', {})
+        results['download_mbps'] = dl_stats.get('bits_per_second', 0) / 1_000_000
     
     # Save raw JSON
     with open(output_dir / f"raw_download_{test_count:03d}.json", 'w') as f:
@@ -129,7 +131,9 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
         results['upload_lost_packets'] = ul_stats.get('lost_packets', 0)
         results['upload_lost_percent'] = ul_stats.get('lost_percent', 0)
     else:
-        results['upload_mbps'] = data['end']['sum_sent']['bits_per_second'] / 1_000_000
+        # Safe parsing for TCP to prevent crashes on dropped connections
+        ul_stats = data.get('end', {}).get('sum_sent', {})
+        results['upload_mbps'] = ul_stats.get('bits_per_second', 0) / 1_000_000
     
     # Save raw JSON
     with open(output_dir / f"raw_upload_{test_count:03d}.json", 'w') as f:
@@ -195,6 +199,8 @@ def main():
     test_number = int(os.environ.get('TEST_NUMBER', 1))
     client_loc = os.environ.get('CLIENT_LOC', 'unknown')
     server_loc = os.environ.get('SERVER_LOC', 'unknown')
+    client_ant = os.environ.get('CLIENT_ANTENNA', 'unknown')
+    server_ant = os.environ.get('SERVER_ANTENNA', 'unknown')
     
     # Validate mode
     if mode not in ['client', 'server']:
@@ -229,12 +235,14 @@ def main():
     results, raw_results = run_tests(server_ip, port, duration, output_dir, test_number, protocol, bandwidth, bind_interface)
     save_to_csv(results, csv_file, test_number, protocol)
     
-    # Publish to NATS
+    # Publish to NATS with the new antenna fields
     nats_payload = {
         'timestamp': datetime.datetime.now().isoformat(),
         'test_number': test_number,
         'client_location': client_loc,
+        'client_antenna': client_ant,
         'server_location': server_loc,
+        'server_antenna': server_ant,
         'protocol': protocol,
         'results': results,
         'raw_download': raw_results['download'],
