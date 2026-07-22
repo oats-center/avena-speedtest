@@ -94,10 +94,12 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     raw_results['download'] = data
     
     if protocol == 'udp':
-        results['download_mbps'] = data['end']['sum']['bits_per_second'] / 1_000_000
-        results['download_jitter_ms'] = data['end']['sum'].get('jitter_ms', 0)
-        results['download_lost_packets'] = data['end']['sum'].get('lost_packets', 0)
-        results['download_lost_percent'] = data['end']['sum'].get('lost_percent', 0)
+        # Safely check for 'sum', fallback to 'sum_received', or use an empty dict
+        dl_stats = data.get('end', {}).get('sum', data.get('end', {}).get('sum_received', {}))
+        results['download_mbps'] = dl_stats.get('bits_per_second', 0) / 1_000_000
+        results['download_jitter_ms'] = dl_stats.get('jitter_ms', 0)
+        results['download_lost_packets'] = dl_stats.get('lost_packets', 0)
+        results['download_lost_percent'] = dl_stats.get('lost_percent', 0)
     else:
         results['download_mbps'] = data['end']['sum_received']['bits_per_second'] / 1_000_000
     
@@ -120,10 +122,12 @@ def run_tests(server_ip, port, duration, output_dir, test_count, protocol, bandw
     raw_results['upload'] = data
     
     if protocol == 'udp':
-        results['upload_mbps'] = data['end']['sum']['bits_per_second'] / 1_000_000
-        results['upload_jitter_ms'] = data['end']['sum'].get('jitter_ms', 0)
-        results['upload_lost_packets'] = data['end']['sum'].get('lost_packets', 0)
-        results['upload_lost_percent'] = data['end']['sum'].get('lost_percent', 0)
+        # Safely check for 'sum', fallback to 'sum_sent', or use an empty dict
+        ul_stats = data.get('end', {}).get('sum', data.get('end', {}).get('sum_sent', {}))
+        results['upload_mbps'] = ul_stats.get('bits_per_second', 0) / 1_000_000
+        results['upload_jitter_ms'] = ul_stats.get('jitter_ms', 0)
+        results['upload_lost_packets'] = ul_stats.get('lost_packets', 0)
+        results['upload_lost_percent'] = ul_stats.get('lost_percent', 0)
     else:
         results['upload_mbps'] = data['end']['sum_sent']['bits_per_second'] / 1_000_000
     
